@@ -5,7 +5,9 @@
 
 extern const unsigned char *const rooms[];
 
-extern const char level_1_enemies[];
+enum { ENEMY_CHASE, ENEMY_BOUNCE };
+
+extern const unsigned char *const Enemy_list[];
 
 #define MAX_ROOMS (5 - 1)
 #define MAX_SCROLL (MAX_ROOMS * 0x100 - 1)

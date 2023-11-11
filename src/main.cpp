@@ -72,27 +72,11 @@ struct Player {
   unsigned char const * const * animation;
   unsigned char const * animation_duration;
   unsigned char is_crouching;
-	unsigned char is_punching;
-	unsigned char punch_counter;
+  unsigned char is_punching;
+  unsigned char punch_counter;
 };
 
 struct Player Ninj = {0x3000, 0x4000, 0, 0, 1, 0, FALL_DELAY_FRAMES, 10, 0, player_stand_right_anim, player_stand_duration, 0, 0, 0};
-
-//level variables
-/*unsigned char level_num = 0;
-
-typedef struct level_t {
-    const unsigned char * tile_maps;
-    const unsigned char * collision_maps;
-    const unsigned char map_width;
-    const unsigned char map_height;
-    const unsigned char bank_tile;
-    const unsigned char bank_collision;
-} level_t; 
-
-int entity_screen;
-
-const unsigned char total_levels;*/
 
 static unsigned char collision_map[256];
 static unsigned char collision_map2[256];
@@ -123,7 +107,20 @@ static unsigned char L_R_switch;
 unsigned char const * const * old_animation = player_stand_right_anim;
 
 unsigned char game_mode;
-enum { MODE_GAME, MODE_PAUSE };
+enum {
+  MODE_TITLE,
+  MODE_GAME,
+  MODE_PAUSE,
+  MODE_SWITCH,
+  MODE_END,
+  MODE_GAME_OVER
+};
+
+unsigned char level;
+unsigned char level_up;
+unsigned char death;
+unsigned char map_loaded;   // only load it once
+unsigned char enemy_frames; // in case of skipped frames
 
 #define MAX_ENEMY 8
 unsigned enemy_x[MAX_ENEMY];
@@ -131,6 +128,8 @@ unsigned enemy_y[MAX_ENEMY];
 unsigned char enemy_active[MAX_ENEMY];
 unsigned char enemy_room[MAX_ENEMY];
 unsigned enemy_actual_x[MAX_ENEMY];
+unsigned char enemy_type[MAX_ENEMY];
+const unsigned char *enemy_anim[MAX_ENEMY];
 
 #define ENEMY_WIDTH 13
 #define ENEMY_HEIGHT 26
@@ -150,7 +149,7 @@ unsigned char shurik_throw_index;
 #define SHURIK_HEIGHT 8
 
 void load_room(void);
-void draw_sprites(void);
+//void draw_sprites(void);
 void flicker_sprites(void);
 void animate_player(void);
 void movement(void);
@@ -160,6 +159,7 @@ void draw_screen_R(void);
 void new_cmap(void);
 char bg_collision_sub(unsigned x, unsigned char y);
 void bg_check_low(unsigned char x, unsigned char y, unsigned char width, unsigned char height);
+void bg_collision_horizontal(char x, char y, char width);
 
 void enemy_moves(void);
 void playenemy_collisions(void);
@@ -189,16 +189,16 @@ struct Metatile {
 static const soa::Array<Metatile, 12> metatiles = {
   { 0, 0, 0, 0, 0 },
   { 1, 1, 1, 1, 0,},
-	{ 2, 2, 2, 2, 0,},
-	{ 3, 3, 3, 3, 0,},
-	{ 1, 1, 1, 1, 85,},
-	{ 2, 2, 2, 2, 85,},
-	{ 3, 3, 3, 3, 85,},
-	{ 1, 1, 1, 1, 170,},
-	{ 2, 2, 2, 2, 170,},
-	{ 3, 3, 3, 3, 170,},
-	{ 1, 1, 1, 1, 255,},
-	{ 2, 2, 2, 2, 255,}
+  { 2, 2, 2, 2, 0,},
+  { 3, 3, 3, 3, 0,},
+  { 1, 1, 1, 1, 85,},
+  { 2, 2, 2, 2, 85,},
+  { 3, 3, 3, 3, 85,},
+  { 1, 1, 1, 1, 170,},
+  { 2, 2, 2, 2, 170,},
+  { 3, 3, 3, 3, 170,},
+  { 1, 1, 1, 1, 255,},
+  { 2, 2, 2, 2, 255,}
 };
 
 static uint8_t shuffle_offset;
@@ -262,8 +262,6 @@ static uint8_t mod_add(uint8_t l, uint8_t r) {
 
 int main() {
   init_ppu();
-  
-  set_vram_buffer(); // do at least once
 
   load_room();
 
@@ -271,9 +269,13 @@ int main() {
 
   // Store pad state across frames to check for changes
   prev_pad_state = 0;
+	
+	game_mode = MODE_GAME;
   
   unsigned char old_direction = 0;
-
+	
+	unsigned char bright = 0;
+  unsigned char bright_count = 0;
   while (1) {
     // infinite loop
     while (game_mode == MODE_GAME) {
@@ -284,8 +286,7 @@ int main() {
       set_scroll_y(scroll_y);
       
       animate_player();
-      draw_sprites();
-			flicker_sprites();
+      flicker_sprites();
       //printf("frame change done!\n");
       
       pad1 = pad_poll(0); // read the first controller
@@ -294,18 +295,17 @@ int main() {
       movement();
       check_spr_objects(); // see which objects are on screen
       playenemy_collisions();
-			enemy_moves();
-			
-			if (Ninj.is_punching) {
-				playenemy_melee_collisions();
-				if (Ninj.punch_counter > 0) {
-					Ninj.punch_counter--;
-				} else {
-					Ninj.is_punching = 0;
-				}
-			}
       
-      for (char i = 0; i < MAX_SHURIK ; ++i){
+      if (Ninj.is_punching) {
+        playenemy_melee_collisions();
+        if (Ninj.punch_counter > 0) {
+          Ninj.punch_counter--;
+        } else {
+          Ninj.is_punching = 0;
+        }
+      }
+      
+      for (uint8_t i = 0; i < MAX_SHURIK ; ++i){
         shurenemy_collisions(i);
       }
       
@@ -317,9 +317,44 @@ int main() {
         game_mode = MODE_PAUSE;
         color_emphasis(COL_EMP_DARK);
       }
+			
+			if (level_up) {
+        game_mode = MODE_SWITCH;
+        level_up = 0;
+        bright = 4;
+        bright_count = 0;
+        ++level;
+      } else if (death) {
+        game_mode = MODE_SWITCH;
+        bright = 4;
+        bright_count = 0;
+      }
       
       prev_pad_state = pad1;
       old_direction = Ninj.direction;
+    }
+		// switch rooms, due to level++
+    // also, death, restart level (removed feature)
+    while (game_mode == MODE_SWITCH) {
+      ppu_wait_nmi();
+      if (++bright_count >= 0x10) { // fade out
+        bright_count = 0;
+        if (--bright != 0xff)
+          pal_bright(bright); // fade out
+      }
+      set_scroll_x(scroll_x);
+
+      if (bright == 0xff) { // now switch rooms
+        ppu_off();
+        oam_clear();
+        scroll_x = 0;
+        set_scroll_x(scroll_x);
+        
+          load_room();
+          game_mode = MODE_GAME;
+          ppu_on_all();
+          pal_bright(4); // back to normal brighness
+      }
     }
     while (game_mode == MODE_PAUSE) {
       ppu_wait_nmi();
@@ -327,7 +362,7 @@ int main() {
       pad1 = pad_poll(0); // read the first controller
       pad1_new = get_pad_new(0);
 
-      draw_sprites();
+      flicker_sprites();
 
       if (pad1 & PAD_START && !(prev_pad_state & PAD_START)) {
         game_mode = MODE_GAME;
@@ -341,13 +376,13 @@ int main() {
 void load_room(void) {
   set_data_pointer(rooms[0]);
   
-  for (char x = 0;; x += 0x10) {
-    for (char i = 0; i < 30; i+=2) {
+  for (uint8_t x = 0;; x += 0x10) {
+    for (uint8_t i = 0; i < 30; i+=2) {
       auto tile = *(rooms[0] + (x & 0xf0) + (i >> 1));
-			column_map[i] = metatiles[tile].tl;
-			column_map[i+1] = metatiles[tile].tr;
-			column_map2[i] = metatiles[tile].bl;
-			column_map2[i+1] = metatiles[tile].br;
+      column_map[i] = metatiles[tile].tl;
+      column_map[i+1] = metatiles[tile].tr;
+      column_map2[i] = metatiles[tile].bl;
+      column_map2[i+1] = metatiles[tile].br;
     }
     
     multi_vram_buffer_vert(column_map, 30, get_ppu_addr(0, x, 0));
@@ -357,28 +392,29 @@ void load_room(void) {
     if (x == 0xf0)
       break;
   }
-  for (char x = 0;; x += 0x10) {
-    for (char i = 0; i < 8; i++) {
-			auto tile = rooms[0] + (x & 0xf0) + (i << 1);
-			if ((x & 0x10) == 0){
-				column_map_atr[i] = 0;
-				column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
-				column_map_atr[i] += (metatiles[*(tile+1)].attr & ATTRIBUTE_BOTTOM_LEFT);
-				//printf("left attribute\n");
-			} else {
-				column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_RIGHT);
-				column_map_atr[i] += (metatiles[*(tile+1)].attr & ATTRIBUTE_BOTTOM_RIGHT);
-				//printf("right attribute\n");
-			}
+  for (uint8_t x = 0;; x += 0x10) {
+    for (uint8_t i = 0; i < 8; i++) {
+      auto tile = rooms[0] + (x & 0xf0) + (i << 1);
+      if ((x & 0x10) == 0){
+        column_map_atr[i] = 0;
+        column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
+        column_map_atr[i] += (metatiles[*(tile+1)].attr & ATTRIBUTE_BOTTOM_LEFT);
+        //printf("left attribute\n");
+      } else {
+        column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_RIGHT);
+        column_map_atr[i] += (metatiles[*(tile+1)].attr & ATTRIBUTE_BOTTOM_RIGHT);
+        //printf("right attribute\n");
+      }
     }
-		if ((x & 0x10) == 0x10) {
-			auto addr = get_at_addr(0,x,0);
-			for (auto i = 0; i < 8; ++i) {
-				one_vram_buffer(column_map_atr[i], addr);
-				addr += 8;
-			}
-		}
-		if (x == 0xf0)
+    if ((x & 0x10) == 0x10) {
+      auto addr = get_at_addr(0,x,0);
+      for (auto i = 0; i < 8; ++i) {
+        one_vram_buffer(column_map_atr[i], addr);
+        addr += 8;
+      }
+      flush_vram_update2();
+    }
+    if (x == 0xf0)
       break;
   }
   
@@ -386,12 +422,12 @@ void load_room(void) {
   // a little bit in the next room
   set_data_pointer(rooms[0]+256);
   
-  for (char i = 0; i < 30; i+=2) {
-		auto tile = *(rooms[0] + 256 + (i >> 1));
-		column_map[i] = metatiles[tile].tl;
-		column_map[i+1] = metatiles[tile].tr;
-		column_map2[i] = metatiles[tile].bl;
-		column_map2[i+1] = metatiles[tile].br;
+  for (uint8_t i = 0; i < 30; i+=2) {
+    auto tile = *(rooms[0] + 256 + (i >> 1));
+    column_map[i] = metatiles[tile].tl;
+    column_map[i+1] = metatiles[tile].tr;
+    column_map2[i] = metatiles[tile].bl;
+    column_map2[i+1] = metatiles[tile].br;
   }
   
   multi_vram_buffer_vert(column_map, 30, get_ppu_addr(1, 0, 0));
@@ -406,11 +442,11 @@ void load_room(void) {
 
 void draw_sprites(void) {
   // clear all sprites from sprite buffer
-  oam_clear();
+  
 
   
-  
-  for (char i = 0; i < MAX_ENEMY; ++i) {
+  /*
+  for (uint8_t i = 0; i < MAX_ENEMY; ++i) {
     if (high_byte(enemy_y[i]) == TURN_OFF)
       continue;
     if (high_byte(enemy_x[i]) > 0xf0)
@@ -420,7 +456,7 @@ void draw_sprites(void) {
     }
   }
   
-  for (char i = 0; i < MAX_SHURIK; ++i) {
+  for (uint8_t i = 0; i < MAX_SHURIK; ++i) {
     if (high_byte(shurik_y[i]) == TURN_OFF)
       continue;
     if (high_byte(shurik_x[i]) > 0xf0)
@@ -428,35 +464,51 @@ void draw_sprites(void) {
     if (shurik_active[i] && (high_byte(shurik_y[i]) < 0xf0)) {
       oam_meta_spr(high_byte(shurik_x[i])+12, high_byte(shurik_y[i])+19, shurik0_data);
     }
-  }
+  }*/
   
 }
 
 //Thanks Jroweboy
 void flicker_sprites(void) {
-        
-				sprite_slot = 0;
-        
-    
-        // Draw the player first to reserve their slot... or not
-        // Everything else can fight with flickering... or not
-        
-
-        // OAM shuffle the rest of the sprites
-        shuffle_offset = mod_add<12>(shuffle_offset, 11);
-        uint8_t original_offset = shuffle_offset;
-        uint8_t count = 12;
-        for (uint8_t i = original_offset; count > 0; --count, i = mod_add<12>(i, 7)) {
-					if (i == 0) {
-						// draw 1 metasprite
+  oam_clear();
+  sprite_slot = 0;
   
-						oam_meta_spr(high_byte(Ninj.x)+15, high_byte(Ninj.y) + 19, Ninj.animation[Ninj.frame]);
-						continue;
-          }
-            
-        }
-				
+  
+  // Draw the player first to reserve their slot... or not
+  // Everything else can fight with flickering... or not
+  
+  
+  // OAM shuffle the rest of the sprites
+  shuffle_offset = mod_add<12>(shuffle_offset, 11);
+  uint8_t original_offset = shuffle_offset;
+  uint8_t count = 12;
+  for (uint8_t i = original_offset; count > 0; --count, i = mod_add<12>(i, 7)) {
+    if (i == 0) {
+      // draw 1 metasprite
+  
+      oam_meta_spr(high_byte(Ninj.x)+15, high_byte(Ninj.y) + 19, Ninj.animation[Ninj.frame]);
+      continue;
     }
+    if (i > 0 && i < MAX_ENEMY+1) {
+      if (high_byte(enemy_y[i-1]) == TURN_OFF)
+        continue;
+      if (high_byte(enemy_x[i-1]) > 0xf0)
+        continue;
+      if (enemy_active[i-1] && (high_byte(enemy_y[i-1]) < 0xf0)) {
+        oam_meta_spr(high_byte(enemy_x[i-1])+15, high_byte(enemy_y[i-1])+19, enemy_anim[i-1]);
+      }
+    }
+    if (i > MAX_ENEMY && i < MAX_SHURIK+MAX_ENEMY+1) {
+      if (high_byte(shurik_y[i-MAX_ENEMY-1]) == TURN_OFF)
+        continue;
+      if (high_byte(shurik_x[i-MAX_ENEMY-1]) > 0xf0)
+        continue;
+      if (shurik_active[i-MAX_ENEMY-1] && (high_byte(shurik_y[i-MAX_ENEMY-1]) < 0xf0)) {
+        oam_meta_spr(high_byte(shurik_x[i-MAX_ENEMY-1])+12, high_byte(shurik_y[i-MAX_ENEMY-1])+19, shurik0_data);
+      }
+    }
+  }
+}
 
 void animate_player(void) {
   if (Ninj.animation != old_animation) {
@@ -485,22 +537,22 @@ void movement(void) {
   if (!(pad1 & PAD_DOWN) || Ninj.onground == 0){
     Ninj.is_crouching = 0;
     if (pad1 & PAD_LEFT) {
-			if (Ninj.animation_duration == player_stand_duration || Ninj.animation_duration == player_crouch_duration ||
+      if (Ninj.animation_duration == player_stand_duration || Ninj.animation_duration == player_crouch_duration ||
           (Ninj.animation_duration == player_throw_duration && Ninj.frame == 1 && Ninj.frame_counter == 0) || Ninj.animation == player_run_right_anim){
-				Ninj.animation = player_run_left_anim;
-				Ninj.animation_duration = player_run_duration;
-			}
-			
+        Ninj.animation = player_run_left_anim;
+        Ninj.animation_duration = player_run_duration;
+      }
+      
       Ninj.direction = LEFT;
       Ninj.vel_x -= ACCEL;
       if (Ninj.vel_x < -MAX_SPEED)
         Ninj.vel_x = -MAX_SPEED;
     } else if (pad1 & PAD_RIGHT) {
-			if (Ninj.animation_duration == player_stand_duration || Ninj.animation_duration == player_crouch_duration ||
+      if (Ninj.animation_duration == player_stand_duration || Ninj.animation_duration == player_crouch_duration ||
           (Ninj.animation_duration == player_throw_duration && Ninj.frame == 1 && Ninj.frame_counter == 0) || Ninj.animation == player_run_left_anim){
-				Ninj.animation = player_run_right_anim;
-				Ninj.animation_duration = player_run_duration;
-			}
+        Ninj.animation = player_run_right_anim;
+        Ninj.animation_duration = player_run_duration;
+      }
       
       Ninj.direction = RIGHT;
       Ninj.vel_x += ACCEL;
@@ -525,14 +577,14 @@ void movement(void) {
     } 
   } else {
       Ninj.is_crouching = 1;
-			if (Ninj.animation_duration == player_run_duration || Ninj.animation_duration == player_stand_duration ||
-			    (Ninj.animation_duration == player_throw_duration && Ninj.frame == 1 && Ninj.frame_counter == 0)) {
-				if (Ninj.direction == LEFT) {
-					Ninj.animation = player_crouch_left_anim;
-				} else if (Ninj.direction == RIGHT) {
-					Ninj.animation = player_crouch_right_anim;
-				}
-				Ninj.animation_duration = player_crouch_duration;
+      if (Ninj.animation_duration == player_run_duration || Ninj.animation_duration == player_stand_duration ||
+          (Ninj.animation_duration == player_throw_duration && Ninj.frame == 1 && Ninj.frame_counter == 0)) {
+        if (Ninj.direction == LEFT) {
+          Ninj.animation = player_crouch_left_anim;
+        } else if (Ninj.direction == RIGHT) {
+          Ninj.animation = player_crouch_right_anim;
+        }
+        Ninj.animation_duration = player_crouch_duration;
       }
       if (Ninj.vel_x >= 0x100)
         Ninj.vel_x -= ACCEL;
@@ -686,17 +738,17 @@ void movement(void) {
       shurik_throw_index = 0;
     }
   }
-	
-	if (pad1 & PAD_B && !(prev_pad_state & PAD_B)) {
-		if (Ninj.direction == RIGHT) {
+  
+  if (pad1 & PAD_B && !(prev_pad_state & PAD_B)) {
+    if (Ninj.direction == RIGHT) {
       Ninj.animation = player_throw_right_anim;
     } else if (Ninj.direction == LEFT) {
       Ninj.animation = player_throw_left_anim;
     }
-		Ninj.animation_duration = player_throw_duration;
-		Ninj.is_punching = 1;
-		Ninj.punch_counter = PUNCH_TIME;
-	}
+    Ninj.animation_duration = player_throw_duration;
+    Ninj.is_punching = 1;
+    Ninj.punch_counter = PUNCH_TIME;
+  }
 
   // scroll
   unsigned new_x = Ninj.x;
@@ -737,7 +789,7 @@ void movement(void) {
 }
 
 void shurik_moves(void) {
-  for (char i = 0; i < MAX_SHURIK; ++i) {
+  for (uint8_t i = 0; i < MAX_SHURIK; ++i) {
     if (shurik_active[i] == 1) {
       shurik_actual_x[i] += shurik_vel_x[i];
       shurik_y[i] += shurik_vel_y[i];
@@ -755,11 +807,48 @@ void shurik_moves(void) {
   }
 }
 
-void enemy_moves(void) {
-  if (get_frame_count() & 0x01)
-    return; // half speed
+void enemy_moves(uint8_t index) {
+  if (enemy_type[index] == ENEMY_CHASE) {
+    // for bg collisions
+    unsigned x = enemy_x[index];
+    unsigned y = enemy_y[index] + 1536; // mid point
+    uint8_t width = 13;
 
-  for (char i = 0; i < MAX_ENEMY; ++i) {
+    enemy_anim[index] = eninj_standR_data;
+    if (enemy_frames & 1)
+      return; // half speed
+    if (enemy_x[index] > Ninj.x) {
+      bg_collision_horizontal(high_byte(x) - 1, high_byte(y), width);
+      if (collision_L)
+        return;
+      if (enemy_actual_x[index] == 0)
+        --enemy_room[index];
+      enemy_actual_x[index] -= 256;
+    } else if (enemy_x[index] < Ninj.x) {
+      bg_collision_horizontal(high_byte(x) + 1, high_byte(y), width);
+      if (collision_R)
+        return;
+      enemy_actual_x[index] += 256;
+      if (enemy_actual_x[index] == 0)
+        ++enemy_room[index];
+    }
+  } else if (enemy_type[index] == ENEMY_BOUNCE) {
+    char anim_frame = (enemy_frames + (index << 3)) & 0x3f;
+    if (anim_frame < 16) {
+      enemy_anim[index] = eninj_throwR0_data;
+    } else if (anim_frame < 40) {
+      enemy_y[index] -= 256;
+      enemy_anim[index] = eninj_throwR1_data;
+    } else {
+      enemy_anim[index] = eninj_standR_data;
+      // check ground collision
+      bg_check_low(high_byte(enemy_x[index]), high_byte(enemy_y[index]) - 1, 15, 15);
+      if (!collision_D)
+        enemy_y[index] += 256;
+    }
+  }
+
+/*   for (uint8_t i = 0; i < MAX_ENEMY; ++i) {
     if (enemy_active[i]) {
       if (enemy_x[i] > Ninj.x) {
         if (enemy_actual_x[i] == 0)
@@ -771,8 +860,30 @@ void enemy_moves(void) {
           ++enemy_room[i];
       }
     }
-  }
-	//printf("enemy movin\n");
+  } */
+  //printf("enemy movin\n");
+}
+
+void bg_collision_horizontal(char x, char y, char width) {
+  // rewrote this for enemies, bg_collision was too slow
+  collision_L = 0;
+  collision_R = 0;
+
+  if (y >= 0xf0)
+    return;
+
+  unsigned upper_left = x + scroll_x; // upper left (temp6 = save for reuse)
+
+  if (bg_collision_sub(upper_left, y) &
+      COL_ALL) // find a corner in the collision map
+    ++collision_L;
+
+  // upper right
+  unsigned upper_right = upper_left + width;
+
+  if (bg_collision_sub(upper_right, y) &
+      COL_ALL) // find a corner in the collision map
+    ++collision_R;
 }
 
 void bg_collision(unsigned char x, unsigned char y, unsigned char width, unsigned char height) {
@@ -881,34 +992,34 @@ void draw_screen_R(void) {
 
   // important that the main loop clears the vram_buffer
   
-  for (char i = 0; i < 30; i+=2) {
-		auto tile = *(rooms[0] + (pseudo_scroll_x_right & 0xfff0) + (i >> 1));
-		column_map[i] = metatiles[tile].tl;
-		column_map[i+1] = metatiles[tile].tr;
-		column_map2[i] = metatiles[tile].bl;
-		column_map2[i+1] = metatiles[tile].br;
+  for (uint8_t i = 0; i < 30; i+=2) {
+    auto tile = *(rooms[0] + (pseudo_scroll_x_right & 0xfff0) + (i >> 1));
+    column_map[i] = metatiles[tile].tl;
+    column_map[i+1] = metatiles[tile].tr;
+    column_map2[i] = metatiles[tile].bl;
+    column_map2[i+1] = metatiles[tile].br;
   }
 
   multi_vram_buffer_vert(column_map, 30, get_ppu_addr(nt, x, 0));
   multi_vram_buffer_vert(column_map2, 30, get_ppu_addr(nt, x+8, 0));
-	
-	for (char i = 0; i < 8; i++) {
-		auto tile = rooms[0] + (pseudo_scroll_x_right & 0xffe0) + (i<<1);
-		column_map_atr[i] = 0;
-		column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
-		column_map_atr[i] += (metatiles[*(tile + 1)].attr & ATTRIBUTE_BOTTOM_LEFT);
-		//printf("left attribute\n");
-		column_map_atr[i] += (metatiles[*(tile + 16)].attr & ATTRIBUTE_TOP_RIGHT);
-		column_map_atr[i] += (metatiles[*(tile + 17)].attr & ATTRIBUTE_BOTTOM_RIGHT);
-		//printf("right attribute\n");
-		
-	}
-	
-	auto addr = get_at_addr(nt,x,0);
-	for (auto i = 0; i < 8; ++i) {
-		one_vram_buffer(column_map_atr[i], addr);
-		addr += 8;
-	}	
+  
+  for (uint8_t i = 0; i < 8; i++) {
+    auto tile = rooms[0] + (pseudo_scroll_x_right & 0xffe0) + (i<<1);
+    column_map_atr[i] = 0;
+    column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
+    column_map_atr[i] += (metatiles[*(tile + 1)].attr & ATTRIBUTE_BOTTOM_LEFT);
+    //printf("left attribute\n");
+    column_map_atr[i] += (metatiles[*(tile + 16)].attr & ATTRIBUTE_TOP_RIGHT);
+    column_map_atr[i] += (metatiles[*(tile + 17)].attr & ATTRIBUTE_BOTTOM_RIGHT);
+    //printf("right attribute\n");
+    
+  }
+  
+  auto addr = get_at_addr(nt,x,0);
+  for (auto i = 0; i < 8; ++i) {
+    one_vram_buffer(column_map_atr[i], addr);
+    addr += 8;
+  }
 }
 
 void draw_screen_L(void) {
@@ -923,34 +1034,34 @@ void draw_screen_L(void) {
 
   // important that the main loop clears the vram_buffer
 
-  for (char i = 0; i < 30; i+=2) {
+  for (uint8_t i = 0; i < 30; i+=2) {
     auto tile = *(rooms[0] + (pseudo_scroll_x_left & 0xfff0) + (i >> 1));
-		column_map[i] = metatiles[tile].tl;
-		column_map[i+1] = metatiles[tile].tr;
-		column_map2[i] = metatiles[tile].bl;
-		column_map2[i+1] = metatiles[tile].br;
+    column_map[i] = metatiles[tile].tl;
+    column_map[i+1] = metatiles[tile].tr;
+    column_map2[i] = metatiles[tile].bl;
+    column_map2[i+1] = metatiles[tile].br;
   }
   
   multi_vram_buffer_vert(column_map, 30, get_ppu_addr(nt, x, 0));
   multi_vram_buffer_vert(column_map2, 30, get_ppu_addr(nt, x+8, 0));
-	
-	for (char i = 0; i < 8; i++) {
-		auto tile = rooms[0] + (pseudo_scroll_x_left & 0xffe0) + (i<<1);
-		column_map_atr[i] = 0;
-		column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
-		column_map_atr[i] += (metatiles[*(tile + 1)].attr & ATTRIBUTE_BOTTOM_LEFT);
-		//printf("left attribute\n");
-		column_map_atr[i] += (metatiles[*(tile + 16)].attr & ATTRIBUTE_TOP_RIGHT);
-		column_map_atr[i] += (metatiles[*(tile + 17)].attr & ATTRIBUTE_BOTTOM_RIGHT);
-		//printf("right attribute\n");
-		
-	}
-	
-	auto addr = get_at_addr(nt,x,0);
-	for (auto i = 0; i < 8; ++i) {
-		one_vram_buffer(column_map_atr[i], addr);
-		addr += 8;
-	}	
+  
+  for (uint8_t i = 0; i < 8; i++) {
+    auto tile = rooms[0] + (pseudo_scroll_x_left & 0xffe0) + (i<<1);
+    column_map_atr[i] = 0;
+    column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
+    column_map_atr[i] += (metatiles[*(tile + 1)].attr & ATTRIBUTE_BOTTOM_LEFT);
+    //printf("left attribute\n");
+    column_map_atr[i] += (metatiles[*(tile + 16)].attr & ATTRIBUTE_TOP_RIGHT);
+    column_map_atr[i] += (metatiles[*(tile + 17)].attr & ATTRIBUTE_BOTTOM_RIGHT);
+    //printf("right attribute\n");
+    
+  }
+  
+  auto addr = get_at_addr(nt,x,0);
+  for (auto i = 0; i < 8; ++i) {
+    one_vram_buffer(column_map_atr[i], addr);
+    addr += 8;
+  } 
 }
 
 void new_cmap(void) {
@@ -1023,12 +1134,12 @@ void playenemy_melee_collisions(void) {
     unsigned char x, y, width, height;
   };
 
-	int8_t melee_x;
-	if (Ninj.direction == 1) {
-		melee_x = 10;
-	} else {
-		melee_x = -24;
-	}
+  int8_t melee_x;
+  if (Ninj.direction == 1) {
+    melee_x = 10;
+  } else {
+    melee_x = -24;
+  }
 
   struct Box melee_box = {static_cast<unsigned char>(high_byte(Ninj.x) + melee_x), high_byte(Ninj.y),
                             MELEE_WIDTH, MELEE_HEIGHT};
@@ -1044,8 +1155,8 @@ void playenemy_melee_collisions(void) {
     other_box.y = high_byte(enemy_y[i]);
     if (!check_collision(&melee_box, &other_box))
       continue;
-		
-		enemy_y[i] = TURN_OFF << 8;
+    
+    enemy_y[i] = TURN_OFF << 8;
   }
 }
 
@@ -1076,20 +1187,25 @@ void shurenemy_collisions(unsigned char shurik_num) {
 }
 
 void check_spr_objects(void) {
+	++enemy_frames;
   // mark each object "active" if they are, and get the screen x
 
   for (unsigned char i = 0; i < MAX_ENEMY; ++i) {
     enemy_active[i] = 0; // default to zero
     if (high_byte(enemy_y[i]) != TURN_OFF) {
-      unsigned x = (enemy_room[i] << 8) + high_byte(enemy_actual_x[i]) - scroll_x;
+      unsigned x = (enemy_room[i] << 8) | high_byte(enemy_actual_x[i]) - scroll_x;
       enemy_active[i] = !high_byte(x);
-      enemy_x[i] = (x & 0xff) << 8; // screen x coords
+      if (!enemy_active[i])
+        continue;
+      enemy_x[i] = x & 0xff; // screen x coords
+
+      enemy_moves(i); // if active, do it's moves now
     }
   }
   
   for (unsigned char i = 0; i < MAX_SHURIK; ++i) {
     if (high_byte(shurik_y[i]) != TURN_OFF) {
-      unsigned x = (shurik_room[i] << 8) + high_byte(shurik_actual_x[i]) - scroll_x;
+      unsigned x = (shurik_room[i] << 8) | high_byte(shurik_actual_x[i]) - scroll_x;
       shurik_x[i] = (x & 0xff) << 8; // screen x coords
     }
   }
@@ -1097,15 +1213,17 @@ void check_spr_objects(void) {
 
 void sprite_obj_init(void) {
   unsigned char i, j;
-
+	const unsigned char *enemies = Enemy_list[level];
   for (i = 0, j = 0; i < MAX_ENEMY; ++i) {
     enemy_x[i] = 0;
-    enemy_y[i] = level_1_enemies[j++] << 8;
+    enemy_y[i] = enemies[j] << 8;
     if (high_byte(enemy_y[i]) == TURN_OFF)
       break;
     enemy_active[i] = 0;
-    enemy_room[i] = level_1_enemies[j++];
-    enemy_actual_x[i] = (level_1_enemies[j++]) << 8;
+    enemy_room[i] = enemies[++j];
+    enemy_actual_x[i] = (enemies[++j]) << 8;
+		enemy_type[i] = enemies[++j];
+    ++j;
   }
   for (++i; i < MAX_ENEMY; ++i)
     enemy_y[i] = TURN_OFF << 8;
