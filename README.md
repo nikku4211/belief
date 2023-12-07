@@ -5,6 +5,7 @@ I have only tested on Windows using PowerShell 7. Any previous version of PowerS
 I think Linux should work too, but I don't use Linux all that much.
 - [llvm-mos SDK](https://github.com/llvm-mos/llvm-mos-sdk#download)
   - Needs to be easily searchable by CMake. Set CMAKE_PREFIX_PATH to `path/to/llvm-mos` or add `path/to/llvm-mos/bin` to your PATH.
+
 The rest of these should be in your PATH environment variable too:
 - [CMake](https://cmake.org/download/)
 - [Ninja](https://ninja-build.org/)
