@@ -1,10 +1,11 @@
-#include <bank.h>
+#include <mapper.h>
 #include <nesdoug.h>
 #include <neslib.h>
 #include <string.h>
 #include <soa.h>
+#include <stdio.h>
 
-#include "../chr/testbg.h"
+#include "../chr/forestbg.h"
 #include "../chr/playerspr.h"
 #include "../chr/enemyninjspr.h"
 #include "../chr/shurikspr.h"
@@ -12,6 +13,7 @@
 #include "../level/rooms.h"
 #include "sprites.h"
 #include "anim.h"
+#include "bankprgs.h"
 
 #define LEFT 0
 #define RIGHT 1
@@ -39,17 +41,26 @@
 
 MAPPER_USE_VERTICAL_MIRRORING;
 
-extern "C" void __putchar(char c) { POKE(0x4018, c); }
+extern volatile char NAME_UPD_ENABLE;
 
 constexpr unsigned char kScreenWidth = 32;
 constexpr unsigned char kScreenHeight = 30;
 constexpr int kScreenSize = kScreenWidth * kScreenHeight;
 
-constexpr unsigned char background_pal[] = {
-    0x30, 0x15, 0x2b, 0x38, // test0
-    0x0f, 0x18, 0x26, 0x05, // test1
-    0x0f, 0x3a, 0x2c, 0x35, // test2
-    0x0f, 0x01, 0x32, 0x30, // test3
+constexpr unsigned char hud_pal[] = {
+	  0x09, 0x0f, 0x16, 0x36, // hud
+};
+
+constexpr unsigned char forest_background_pal[] = {
+    0x09, 0x16, 0x27, 0x29, // ground and tree bark
+    0x09, 0x0c, 0x1c, 0x21, // far away trees
+    0x09, 0x16, 0x29, 0x19, // tree foliage
+};
+
+constexpr unsigned char cave_background_pal[] = {
+    0x01, 0x10, 0x22, 0x31, // ground
+    0x01, 0x0f, 0x25, 0x20, // boss
+    0x01, 0x16, 0x29, 0x19, // tree foliage
 };
 
 constexpr unsigned char sprite_pal[] = {
@@ -148,11 +159,27 @@ unsigned char shurik_throw_index;
 #define SHURIK_WIDTH 7
 #define SHURIK_HEIGHT 8
 
-void load_room(void);
+struct Metatile {
+  uint8_t tl;
+  uint8_t tr;
+  uint8_t bl;
+  uint8_t br;
+  uint8_t attr;
+	uint8_t coll;
+};
+
+#define SOA_STRUCT Metatile
+#define SOA_MEMBERS MEMBER(tl) MEMBER(tr) MEMBER(bl) MEMBER(br) MEMBER(attr) MEMBER(coll)
+#include <soa-struct.inc>
+
+uint8_t parallax_buf[8 * 16];
+int8_t scroll_diff;
+
+void load_room();
 //void draw_sprites(void);
 void flicker_sprites(void);
 void animate_player(void);
-void movement(void);
+prg_rom_0 static void movement(void);
 void bg_collision(unsigned char x, unsigned char y, unsigned char width, unsigned char height);
 void draw_screen_L(void);
 void draw_screen_R(void);
@@ -160,6 +187,7 @@ void new_cmap(void);
 char bg_collision_sub(unsigned x, unsigned char y);
 void bg_check_low(unsigned char x, unsigned char y, unsigned char width, unsigned char height);
 void bg_collision_horizontal(char x, char y, char width);
+void init_level(void);
 
 void enemy_moves(void);
 void playenemy_collisions(void);
@@ -170,36 +198,48 @@ void sprite_obj_init(void);
 void shurik_moves(void);
 void shurenemy_collisions(unsigned char shurik_num);
 
+void update_tiles(int8_t scroll_diff);
+
 #define ATTRIBUTE_TOP_LEFT 3
 #define ATTRIBUTE_TOP_RIGHT 12
 #define ATTRIBUTE_BOTTOM_LEFT 48
 #define ATTRIBUTE_BOTTOM_RIGHT 192
 
-struct Metatile {
-  uint8_t tl;
-  uint8_t tr;
-  uint8_t bl;
-  uint8_t br;
-  uint8_t attr;
+// 0 = attr 0
+// 85 = attr 1
+// 170 = attr 2
+// 255 = attr 3
+
+static const soa::Array<Metatile, 22> global_metatiles = {
+	//forest
+  { 0, 0, 0, 0, 85, 0},
+  { 1, 2, 22, 23, 85, COL_ALL+COL_DOWN},
+  { 23, 22, 22, 23, 85, COL_ALL+COL_DOWN},
+  { 0, 3, 0, 24, 85,0},
+  { 4, 43, 25, 59, 85,0},
+  { 5, 44, 26, 60, 85,0},
+  { 0, 0, 27, 0, 85,0},
+  { 39, 40, 55, 56, 85,0},
+  { 0, 50, 41, 42, 85,0},
+  { 1, 2, 33, 34, 85,COL_DOWN},
+  { 34, 33, 33, 34, 85,0},
+  { 35, 36, 51, 52, 85,0},
+	{ 37, 38, 53, 54, 85,0},
+	{ 4, 5, 25, 26, 85,0},
+	{ 9, 10, 11, 12, 170,0},
+	{ 17, 18, 19, 20, 170,0},
+	{ 0, 50, 49, 49, 85,0},
+	{ 0, 0, 49, 0, 85,0},
+	{ 32, 7, 48, 28, 255,0},
+	{ 8, 32, 29, 7, 255,0},
+	{ 16, 0, 50, 0, 255,0},
+	{ 13, 14, 15, 16, 170,0},
 };
 
-#define SOA_STRUCT Metatile
-#define SOA_MEMBERS MEMBER(tl) MEMBER(tr) MEMBER(bl) MEMBER(br) MEMBER(attr)
-#include <soa-struct.inc>
-static const soa::Array<Metatile, 12> metatiles = {
-  { 0, 0, 0, 0, 0 },
-  { 1, 1, 1, 1, 0,},
-  { 2, 2, 2, 2, 0,},
-  { 3, 3, 3, 3, 0,},
-  { 1, 1, 1, 1, 85,},
-  { 2, 2, 2, 2, 85,},
-  { 3, 3, 3, 3, 85,},
-  { 1, 1, 1, 1, 170,},
-  { 2, 2, 2, 2, 170,},
-  { 3, 3, 3, 3, 170,},
-  { 1, 1, 1, 1, 255,},
-  { 2, 2, 2, 2, 255,}
-};
+unsigned char level_metatile_index;
+const unsigned char *level_palette;
+
+int16_t old_parallax_scroll;
 
 static uint8_t shuffle_offset;
 static uint8_t sprite_slot;
@@ -220,10 +260,19 @@ void init_ppu() {
   bank_bg(0);
   // Copy background tiles to CHR-RAM
   vram_adr(0x0000);
-  vram_write(testbg, sizeof(testbg) - 1);
+  vram_write(forestbg, sizeof(forestbg) - 1);
+
+	// Set the hud palette
+	
+	pal_col(0, hud_pal[0]);
+	pal_col(1, hud_pal[1]);
+	pal_col(2, hud_pal[2]);
+	pal_col(3, hud_pal[3]);
 
   // Set the background palette
-  pal_bg(background_pal);
+	for (unsigned char i = 0; i < 12; i++) {
+		pal_col(i+4, level_palette[i]);
+	}
 
   // Fill the background with null characters to clear the screen
   vram_adr(NAMETABLE_A);
@@ -260,8 +309,15 @@ static uint8_t mod_add(uint8_t l, uint8_t r) {
     return o;
 }
 
+void init_level(void){
+	level_metatile_index = 0; //the metatiles are one global array, but each level has an index to it
+	level_palette = forest_background_pal; //set the palette to forest
+}
+
 int main() {
-  init_ppu();
+	init_level();
+	
+	init_ppu();
 
   load_room();
 
@@ -273,10 +329,11 @@ int main() {
 	game_mode = MODE_GAME;
   
   unsigned char old_direction = 0;
-	
+	old_parallax_scroll = 0;
 	unsigned char bright = 0;
   unsigned char bright_count = 0;
   while (1) {
+		NAME_UPD_ENABLE = 0;
     // infinite loop
     while (game_mode == MODE_GAME) {
       ppu_wait_nmi(); // wait till beginning of the frame
@@ -287,7 +344,7 @@ int main() {
       
       animate_player();
       flicker_sprites();
-      //printf("frame change done!\n");
+      //puts("frame change done!\n");
       
       pad1 = pad_poll(0); // read the first controller
       pad1_new = get_pad_new(0);
@@ -350,6 +407,10 @@ int main() {
         scroll_x = 0;
         set_scroll_x(scroll_x);
         
+					// Set the background palette
+					for (unsigned char i = 0; i < 12; i++) {
+						pal_col(i+4, level_palette[i]);
+					}
           load_room();
           game_mode = MODE_GAME;
           ppu_on_all();
@@ -368,21 +429,82 @@ int main() {
         game_mode = MODE_GAME;
         color_emphasis(COL_EMP_NORMAL);
       }
+			
+			if (pad1 & (PAD_SELECT) && !(prev_pad_state & (PAD_SELECT))) {
+        level_metatile_index++;
+				level_palette = cave_background_pal;
+				game_mode = MODE_SWITCH;
+      }
       prev_pad_state = pad1;
     }
   }
 }
 
+//thanks jroweboy
+void update_tiles(int8_t scroll_diff) {
+    if (scroll_diff == 0) {
+        return;
+    }
+    if (scroll_diff > 0) {
+        do {
+            // 4 "pairs" of tiles to shift
+            uint8_t offset = 0;
+            for (uint8_t i=0; i < 4; i++) {
+                // 16 bytes per tile
+                asm volatile(R"ASM(
+                    lda #15
+                    clc
+                    adc %0
+                    tax
+                    lda #$80
+                1:  cmp parallax_buf + 16,x
+                    rol parallax_buf,x
+                    rol parallax_buf + 16,x
+                    dex
+                    cpx %0
+                    bpl 1b
+                )ASM" : "+r"(offset) : : "a", "x");
+                offset += 32;
+            }
+        }
+        while ( --scroll_diff > 0);
+    } else {
+        do {
+            // 4 "pairs" of tiles to shift
+            uint8_t offset = 0;
+            for (uint8_t i=0; i < 4; i++) {
+                // 16 bytes per tile
+                asm volatile(R"ASM(
+                    lda #15
+                    clc
+                    adc %0
+                    tax
+                1:  lda parallax_buf,x
+                    lsr
+                    ror parallax_buf + 16,x
+                    ror parallax_buf,x 
+                    dex
+                    cpx %0
+                    bpl 1b
+                )ASM" : "+r"(offset) : : "a", "x");
+                offset += 32;
+            }
+        }
+        while ( ++scroll_diff < 0);
+    }
+}
+
 void load_room(void) {
   set_data_pointer(rooms[0]);
   
+	//put tiles of metatiles in a column map
   for (uint8_t x = 0;; x += 0x10) {
     for (uint8_t i = 0; i < 30; i+=2) {
-      auto tile = *(rooms[0] + (x & 0xf0) + (i >> 1));
-      column_map[i] = metatiles[tile].tl;
-      column_map[i+1] = metatiles[tile].tr;
-      column_map2[i] = metatiles[tile].bl;
-      column_map2[i+1] = metatiles[tile].br;
+      auto tile = *(rooms[0] + (x & 0xf0) + (i >> 1))+level_metatile_index;
+      column_map[i] = global_metatiles[tile].tl;
+      column_map[i+1] = global_metatiles[tile].bl;
+      column_map2[i] = global_metatiles[tile].tr;
+      column_map2[i+1] = global_metatiles[tile].br;
     }
     
     multi_vram_buffer_vert(column_map, 30, get_ppu_addr(0, x, 0));
@@ -397,13 +519,13 @@ void load_room(void) {
       auto tile = rooms[0] + (x & 0xf0) + (i << 1);
       if ((x & 0x10) == 0){
         column_map_atr[i] = 0;
-        column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
-        column_map_atr[i] += (metatiles[*(tile+1)].attr & ATTRIBUTE_BOTTOM_LEFT);
-        //printf("left attribute\n");
+        column_map_atr[i] += (global_metatiles[*(tile)+level_metatile_index].attr & ATTRIBUTE_TOP_LEFT);
+        column_map_atr[i] += (global_metatiles[*(tile+1)+level_metatile_index].attr & ATTRIBUTE_BOTTOM_LEFT);
+        //puts("left attribute\n");
       } else {
-        column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_RIGHT);
-        column_map_atr[i] += (metatiles[*(tile+1)].attr & ATTRIBUTE_BOTTOM_RIGHT);
-        //printf("right attribute\n");
+        column_map_atr[i] += (global_metatiles[*(tile)+level_metatile_index].attr & ATTRIBUTE_TOP_RIGHT);
+        column_map_atr[i] += (global_metatiles[*(tile+1)+level_metatile_index].attr & ATTRIBUTE_BOTTOM_RIGHT);
+        //puts("right attribute\n");
       }
     }
     if ((x & 0x10) == 0x10) {
@@ -423,11 +545,11 @@ void load_room(void) {
   set_data_pointer(rooms[0]+256);
   
   for (uint8_t i = 0; i < 30; i+=2) {
-    auto tile = *(rooms[0] + 256 + (i >> 1));
-    column_map[i] = metatiles[tile].tl;
-    column_map[i+1] = metatiles[tile].tr;
-    column_map2[i] = metatiles[tile].bl;
-    column_map2[i+1] = metatiles[tile].br;
+    auto tile = *(rooms[0] + 256 + (i >> 1))+level_metatile_index;
+    column_map[i] = global_metatiles[tile].tl;
+    column_map[i+1] = global_metatiles[tile].bl;
+    column_map2[i] = global_metatiles[tile].tr;
+    column_map2[i+1] = global_metatiles[tile].br;
   }
   
   multi_vram_buffer_vert(column_map, 30, get_ppu_addr(1, 0, 0));
@@ -437,6 +559,8 @@ void load_room(void) {
   // the second one should auto-load with the scrolling code
   memcpy(collision_map, rooms[0], 256);
   
+	memcpy(parallax_buf, forestbg+144, 128);
+	
   sprite_obj_init();
 }
 
@@ -523,12 +647,12 @@ void animate_player(void) {
       Ninj.frame = 0;
     }
     Ninj.frame_counter = Ninj.animation_duration[Ninj.frame];
-    //printf("frame change go!\n");
+    //puts("frame change go!\n");
   }
   old_animation = Ninj.animation;
 }
 
-void movement(void) {
+prg_rom_0 static void movement(void) {
 
   // handle x
 
@@ -642,7 +766,7 @@ void movement(void) {
   }
   
   while (y_distance > SAFE_JUMP_STEP) {
-    //printf("falling fast function\n");
+    //puts("falling fast function\n");
     Ninj.y += SAFE_JUMP_STEP;
     
     L_R_switch = 0;
@@ -666,7 +790,7 @@ void movement(void) {
     }
     y_distance -= SAFE_JUMP_STEP;
   }
-  //printf("falling fast function over\n");
+  //puts("falling fast function over\n");
   
   L_R_switch = 0;
   if (!Ninj.is_crouching){
@@ -753,7 +877,7 @@ void movement(void) {
   // scroll
   unsigned new_x = Ninj.x;
   unsigned char scroll_amt;
-  if (Ninj.x > MAX_RIGHT) {
+  if (Ninj.x > MAX_RIGHT && scroll_x < MAX_SCROLL) {
     scroll_amt = (Ninj.x - MAX_RIGHT) >> 8;
     scroll_x += scroll_amt;
     high_byte(Ninj.x) -= scroll_amt;
@@ -762,7 +886,7 @@ void movement(void) {
     if ((scroll_x & 0x0f) < 4) {
       new_cmap();
     }
-  } else if (Ninj.x < MAX_LEFT) {
+  } else if (Ninj.x < MAX_LEFT && scroll_x > 0) {
     scroll_amt = (MAX_LEFT - Ninj.x) >> 8;
     scroll_x -= scroll_amt;
     high_byte(Ninj.x) += scroll_amt;
@@ -808,6 +932,10 @@ void shurik_moves(void) {
 }
 
 void enemy_moves(uint8_t index) {
+	//thanks wendel
+	puts("enemy ");
+	putchar('0' + index);
+	puts(" be movin\n");
   if (enemy_type[index] == ENEMY_CHASE) {
     // for bg collisions
     unsigned x = enemy_x[index];
@@ -828,9 +956,9 @@ void enemy_moves(uint8_t index) {
       bg_collision_horizontal(high_byte(x) + 1, high_byte(y), width);
       if (collision_R)
         return;
-      enemy_actual_x[index] += 256;
       if (enemy_actual_x[index] == 0)
         ++enemy_room[index];
+			enemy_actual_x[index] += 256;
     }
   } else if (enemy_type[index] == ENEMY_BOUNCE) {
     char anim_frame = (enemy_frames + (index << 3)) & 0x3f;
@@ -861,7 +989,7 @@ void enemy_moves(uint8_t index) {
       }
     }
   } */
-  //printf("enemy movin\n");
+  //puts("enemy movin\n");
 }
 
 void bg_collision_horizontal(char x, char y, char width) {
@@ -961,22 +1089,8 @@ void bg_collision(unsigned char x, unsigned char y, unsigned char width, unsigne
 
 char bg_collision_sub(unsigned x, unsigned char y) {
   unsigned char upper_left = ((y & 0xff) >> 4) + (x & 0xf0);
-  unsigned char typ = (x & 1 << 8 ? collision_map2 : collision_map)[upper_left];
-  static const unsigned char is_solid[]={
-  0,
-  COL_ALL+COL_DOWN,
-  COL_DOWN,
-  0,
-  COL_DOWN,
-  COL_DOWN,
-  0,
-  0,
-  0,
-  0,
-  0,
-  0
-  };
-  return is_solid[typ];
+  unsigned char typ = (x & 1 << 8 ? collision_map2 : collision_map)[upper_left]+level_metatile_index;
+  return global_metatiles[typ].coll;
 }
 
 void draw_screen_R(void) {
@@ -993,11 +1107,11 @@ void draw_screen_R(void) {
   // important that the main loop clears the vram_buffer
   
   for (uint8_t i = 0; i < 30; i+=2) {
-    auto tile = *(rooms[0] + (pseudo_scroll_x_right & 0xfff0) + (i >> 1));
-    column_map[i] = metatiles[tile].tl;
-    column_map[i+1] = metatiles[tile].tr;
-    column_map2[i] = metatiles[tile].bl;
-    column_map2[i+1] = metatiles[tile].br;
+    auto tile = *(rooms[0] + (pseudo_scroll_x_right & 0xfff0) + (i >> 1))+level_metatile_index;
+    column_map[i] = global_metatiles[tile].tl;
+    column_map[i+1] = global_metatiles[tile].bl;
+    column_map2[i] = global_metatiles[tile].tr;
+    column_map2[i+1] = global_metatiles[tile].br;
   }
 
   multi_vram_buffer_vert(column_map, 30, get_ppu_addr(nt, x, 0));
@@ -1006,12 +1120,12 @@ void draw_screen_R(void) {
   for (uint8_t i = 0; i < 8; i++) {
     auto tile = rooms[0] + (pseudo_scroll_x_right & 0xffe0) + (i<<1);
     column_map_atr[i] = 0;
-    column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
-    column_map_atr[i] += (metatiles[*(tile + 1)].attr & ATTRIBUTE_BOTTOM_LEFT);
-    //printf("left attribute\n");
-    column_map_atr[i] += (metatiles[*(tile + 16)].attr & ATTRIBUTE_TOP_RIGHT);
-    column_map_atr[i] += (metatiles[*(tile + 17)].attr & ATTRIBUTE_BOTTOM_RIGHT);
-    //printf("right attribute\n");
+    column_map_atr[i] += (global_metatiles[*(tile)+level_metatile_index].attr & ATTRIBUTE_TOP_LEFT);
+    column_map_atr[i] += (global_metatiles[*(tile + 1)+level_metatile_index].attr & ATTRIBUTE_BOTTOM_LEFT);
+    //puts("left attribute\n");
+    column_map_atr[i] += (global_metatiles[*(tile + 16)+level_metatile_index].attr & ATTRIBUTE_TOP_RIGHT);
+    column_map_atr[i] += (global_metatiles[*(tile + 17)+level_metatile_index].attr & ATTRIBUTE_BOTTOM_RIGHT);
+    //puts("right attribute\n");
     
   }
   
@@ -1020,6 +1134,13 @@ void draw_screen_R(void) {
     one_vram_buffer(column_map_atr[i], addr);
     addr += 8;
   }
+	
+	// for every 2 px the screen scrolls, counter scroll by 1px
+  int16_t new_parallax_scroll = scroll_x >> 1;
+  scroll_diff = new_parallax_scroll - old_parallax_scroll;
+  update_tiles(scroll_diff);
+	
+	old_parallax_scroll = new_parallax_scroll;
 }
 
 void draw_screen_L(void) {
@@ -1035,11 +1156,11 @@ void draw_screen_L(void) {
   // important that the main loop clears the vram_buffer
 
   for (uint8_t i = 0; i < 30; i+=2) {
-    auto tile = *(rooms[0] + (pseudo_scroll_x_left & 0xfff0) + (i >> 1));
-    column_map[i] = metatiles[tile].tl;
-    column_map[i+1] = metatiles[tile].tr;
-    column_map2[i] = metatiles[tile].bl;
-    column_map2[i+1] = metatiles[tile].br;
+    auto tile = *(rooms[0] + (pseudo_scroll_x_left & 0xfff0) + (i >> 1))+level_metatile_index;
+    column_map[i] = global_metatiles[tile].tl;
+    column_map[i+1] = global_metatiles[tile].bl;
+    column_map2[i] = global_metatiles[tile].tr;
+    column_map2[i+1] = global_metatiles[tile].br;
   }
   
   multi_vram_buffer_vert(column_map, 30, get_ppu_addr(nt, x, 0));
@@ -1048,12 +1169,12 @@ void draw_screen_L(void) {
   for (uint8_t i = 0; i < 8; i++) {
     auto tile = rooms[0] + (pseudo_scroll_x_left & 0xffe0) + (i<<1);
     column_map_atr[i] = 0;
-    column_map_atr[i] += (metatiles[*(tile)].attr & ATTRIBUTE_TOP_LEFT);
-    column_map_atr[i] += (metatiles[*(tile + 1)].attr & ATTRIBUTE_BOTTOM_LEFT);
-    //printf("left attribute\n");
-    column_map_atr[i] += (metatiles[*(tile + 16)].attr & ATTRIBUTE_TOP_RIGHT);
-    column_map_atr[i] += (metatiles[*(tile + 17)].attr & ATTRIBUTE_BOTTOM_RIGHT);
-    //printf("right attribute\n");
+    column_map_atr[i] += (global_metatiles[*(tile)+level_metatile_index].attr & ATTRIBUTE_TOP_LEFT);
+    column_map_atr[i] += (global_metatiles[*(tile + 1)+level_metatile_index].attr & ATTRIBUTE_BOTTOM_LEFT);
+    //puts("left attribute\n");
+    column_map_atr[i] += (global_metatiles[*(tile + 16)+level_metatile_index].attr & ATTRIBUTE_TOP_RIGHT);
+    column_map_atr[i] += (global_metatiles[*(tile + 17)+level_metatile_index].attr & ATTRIBUTE_BOTTOM_RIGHT);
+    //puts("right attribute\n");
     
   }
   
@@ -1062,6 +1183,13 @@ void draw_screen_L(void) {
     one_vram_buffer(column_map_atr[i], addr);
     addr += 8;
   } 
+	
+	// for every 2 px the screen scrolls, counter scroll by 1px
+  int16_t new_parallax_scroll = scroll_x >> 1;
+  scroll_diff = new_parallax_scroll - old_parallax_scroll;
+  update_tiles(scroll_diff);
+	
+	old_parallax_scroll = new_parallax_scroll;
 }
 
 void new_cmap(void) {
@@ -1187,6 +1315,7 @@ void shurenemy_collisions(unsigned char shurik_num) {
 }
 
 void check_spr_objects(void) {
+	//puts("checking sprite objects\n");
 	++enemy_frames;
   // mark each object "active" if they are, and get the screen x
 
@@ -1197,9 +1326,9 @@ void check_spr_objects(void) {
       enemy_active[i] = !high_byte(x);
       if (!enemy_active[i])
         continue;
-      enemy_x[i] = x & 0xff; // screen x coords
+      enemy_x[i] = (x & 0xff) << 8; // screen x coords
 
-      enemy_moves(i); // if active, do it's moves now
+      enemy_moves(i); // if active, do its moves now
     }
   }
   
