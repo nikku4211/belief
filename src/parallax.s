@@ -1,3 +1,4 @@
+; thanks jroweboy
 .include "nes.inc"
 
 ; placed before running nametable updates
@@ -16,13 +17,13 @@ flush_parallax_update:
   beq .LskipUpdateParallax
   lda #$00
   sta PPUADDR
-  lda #$90
+  lda #$B0
   sta PPUADDR
   lda PPUCTRL_VAR
   and #$fb
   sta PPUCTRL
-; this is where if this update loop isn't fast enough you can use
-; an unrolled loop to make it faster
+;this is where if this update loop isn't fast enough you can use
+;an unrolled loop to make it faster
   ldx #127
 .LparallaxLoop:
     lda parallax_buf - 127,x
