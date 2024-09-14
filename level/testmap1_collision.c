@@ -1,6 +1,7 @@
 #include <neslib.h>
+#include "../src/bankprgs.h"
 
-const unsigned char testmap1_collision[] = {
+prg_rom_0 const unsigned char testmap1_collision[] = {
 0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,
 0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,
 0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,
