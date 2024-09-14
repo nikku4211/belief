@@ -28,7 +28,7 @@ set(CMAKE_DEPFILE_FLAGS_ASM)
 
 # Set linker flags for all binaries
 add_link_options(
-    -g -gdwarf-4 -Wall -Wextra -Werror # Same goes for the linker
+    -Os -flto -g -gdwarf-4 -Wall -Wextra -Werror # Same goes for the linker
 )
 
 # This creates the `chr_data` object with the contents of CHR-ROM. See
