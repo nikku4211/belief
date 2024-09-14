@@ -6,7 +6,7 @@ set(BIN2H ${CMAKE_CURRENT_SOURCE_DIR}/bin2h.py)
 
 # Create commands to convert BG PNGs to CHRs
 set(CHR_FILES "")
-file(GLOB PNG_FILES ${CMAKE_CURRENT_SOURCE_DIR}/testbg.png)
+file(GLOB PNG_FILES ${CMAKE_CURRENT_SOURCE_DIR}/forestbg.png)
 foreach(PNG_FILE ${PNG_FILES})
     get_filename_component(PNG_NAME ${PNG_FILE} NAME_WE)
     set(CHR_FILE ${CMAKE_CURRENT_BINARY_DIR}/${PNG_NAME}.chr)
