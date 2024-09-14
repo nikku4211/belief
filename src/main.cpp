@@ -198,7 +198,7 @@ void sprite_obj_init(void);
 void shurik_moves(void);
 void shurenemy_collisions(unsigned char shurik_num);
 
-void update_tiles(int8_t scroll_diff);
+void update_tiles(int8_t diff);
 
 #define ATTRIBUTE_TOP_LEFT 3
 #define ATTRIBUTE_TOP_RIGHT 12
@@ -227,13 +227,13 @@ static const soa::Array<Metatile, 22> global_metatiles = {
 	{ 37, 38, 53, 54, 85,0},
 	{ 4, 5, 25, 26, 85,0},
 	{ 9, 10, 11, 12, 170,0},
-	{ 17, 18, 19, 20, 170,0},
+	{ 15, 16, 19, 20, 170,0},
 	{ 0, 50, 49, 49, 85,0},
 	{ 0, 0, 49, 0, 85,0},
 	{ 32, 7, 48, 28, 255,0},
 	{ 8, 32, 29, 7, 255,0},
 	{ 16, 0, 50, 0, 255,0},
-	{ 13, 14, 15, 16, 170,0},
+	{ 13, 14, 13, 14, 170,0},
 };
 
 unsigned char level_metatile_index;
@@ -243,6 +243,9 @@ int16_t old_parallax_scroll;
 
 static uint8_t shuffle_offset;
 static uint8_t sprite_slot;
+
+static unsigned char rendered_x_left;
+static unsigned char rendered_x_right;
 
 void init_ppu() {
   // Disable the PPU so we can freely modify its state
@@ -333,10 +336,10 @@ int main() {
 	unsigned char bright = 0;
   unsigned char bright_count = 0;
   while (1) {
-		NAME_UPD_ENABLE = 0;
     // infinite loop
     while (game_mode == MODE_GAME) {
       ppu_wait_nmi(); // wait till beginning of the frame
+		  NAME_UPD_ENABLE = 0;
 
       // set scroll
       set_scroll_x(scroll_x);
@@ -441,11 +444,11 @@ int main() {
 }
 
 //thanks jroweboy
-void update_tiles(int8_t scroll_diff) {
-    if (scroll_diff == 0) {
+void update_tiles(int8_t diff) {
+    if (diff == 0) {
         return;
     }
-    if (scroll_diff > 0) {
+    if (diff < 0) {
         do {
             // 4 "pairs" of tiles to shift
             uint8_t offset = 0;
@@ -457,7 +460,8 @@ void update_tiles(int8_t scroll_diff) {
                     adc %0
                     tax
                     lda #$80
-                1:  cmp parallax_buf + 16,x
+                1:  lda parallax_buf + 16,x
+                    asl
                     rol parallax_buf,x
                     rol parallax_buf + 16,x
                     dex
@@ -467,7 +471,7 @@ void update_tiles(int8_t scroll_diff) {
                 offset += 32;
             }
         }
-        while ( --scroll_diff > 0);
+        while ( ++diff > 0);
     } else {
         do {
             // 4 "pairs" of tiles to shift
@@ -490,7 +494,7 @@ void update_tiles(int8_t scroll_diff) {
                 offset += 32;
             }
         }
-        while ( ++scroll_diff < 0);
+        while ( --diff < 0);
     }
 }
 
@@ -896,6 +900,14 @@ prg_rom_0 static void movement(void) {
       new_cmap();
     }
   }
+  
+	
+	// for every 2 px the screen scrolls, counter scroll by 1px
+  int16_t new_parallax_scroll = scroll_x >> 1;
+  scroll_diff = new_parallax_scroll - old_parallax_scroll;
+  update_tiles(scroll_diff);
+	
+	old_parallax_scroll = new_parallax_scroll;
 
   if (scroll_x >= MAX_SCROLL) {
     scroll_x = MAX_SCROLL; // stop scrolling right, end of level
@@ -1096,13 +1108,20 @@ char bg_collision_sub(unsigned x, unsigned char y) {
 void draw_screen_R(void) {
   // scrolling to the right, draw metatiles as we go
   pseudo_scroll_x_right = scroll_x + 0x110;
+  unsigned char x = pseudo_scroll_x_right & 0xf0;
+
+  // If we've already drawn this strip of metatiles, just return
+  if (rendered_x_right == x) {
+    return;
+  }
+
+  rendered_x_right = x;
 
   unsigned char room = pseudo_scroll_x_right >> 8;
   unsigned char roomp = high_byte(pseudo_scroll_x_right);
 
   set_data_pointer(rooms[0]+roomp);
   unsigned char nt = room & 1;
-  unsigned char x = pseudo_scroll_x_right & 0xf0;
 
   // important that the main loop clears the vram_buffer
   
@@ -1134,24 +1153,25 @@ void draw_screen_R(void) {
     one_vram_buffer(column_map_atr[i], addr);
     addr += 8;
   }
-	
-	// for every 2 px the screen scrolls, counter scroll by 1px
-  int16_t new_parallax_scroll = scroll_x >> 1;
-  scroll_diff = new_parallax_scroll - old_parallax_scroll;
-  update_tiles(scroll_diff);
-	
-	old_parallax_scroll = new_parallax_scroll;
+  NAME_UPD_ENABLE = 1;
 }
 
 void draw_screen_L(void) {
   // scrolling to the left, draw metatiles as we go
   pseudo_scroll_x_left = scroll_x - 0x10;
+  unsigned char x = pseudo_scroll_x_left & 0xf0;
+
+  // If we've already drawn this strip of metatiles, just return
+  if (rendered_x_left == x) {
+    return;
+  }
+
+  rendered_x_left = x;
 
   unsigned char room = pseudo_scroll_x_left >> 8;
 
   set_data_pointer(rooms[0]+(room << 8));
   unsigned char nt = room & 1;
-  unsigned char x = pseudo_scroll_x_left & 0xf0;
 
   // important that the main loop clears the vram_buffer
 
@@ -1182,14 +1202,8 @@ void draw_screen_L(void) {
   for (auto i = 0; i < 8; ++i) {
     one_vram_buffer(column_map_atr[i], addr);
     addr += 8;
-  } 
-	
-	// for every 2 px the screen scrolls, counter scroll by 1px
-  int16_t new_parallax_scroll = scroll_x >> 1;
-  scroll_diff = new_parallax_scroll - old_parallax_scroll;
-  update_tiles(scroll_diff);
-	
-	old_parallax_scroll = new_parallax_scroll;
+  }
+  NAME_UPD_ENABLE = 1;
 }
 
 void new_cmap(void) {
