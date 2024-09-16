@@ -71,16 +71,22 @@ unsigned char level;
 unsigned char level_up;
 unsigned char death;
 unsigned char map_loaded;   // only load it once
-unsigned char enemy_frames; // in case of skipped frames
+unsigned char enemy_timer; // in case of skipped frames
 
 #define MAX_ENEMY 8
 unsigned enemy_x[MAX_ENEMY];
 unsigned enemy_y[MAX_ENEMY];
+int enemy_vel_x[MAX_ENEMY];
+int enemy_vel_y[MAX_ENEMY];
 unsigned char enemy_active[MAX_ENEMY];
 unsigned char enemy_room[MAX_ENEMY];
 unsigned enemy_actual_x[MAX_ENEMY];
 unsigned char enemy_type[MAX_ENEMY];
-const unsigned char *enemy_anim[MAX_ENEMY];
+unsigned char enemy_frame_counter[MAX_ENEMY];
+unsigned char enemy_frame[MAX_ENEMY];
+unsigned char const * const * enemy_anim[MAX_ENEMY];
+unsigned char const * enemy_anim_duration[MAX_ENEMY];
+unsigned char const * const * old_enemy_animation[MAX_ENEMY];
 
 #define ENEMY_WIDTH 13
 #define ENEMY_HEIGHT 26
@@ -104,6 +110,7 @@ uint8_t parallax_buf[6 * 16];
 //void draw_sprites(void);
 void flicker_sprites(void);
 void animate_player(void);
+void animate_enemies(void);
 void init_level(void);
 
 // 0 = attr 0
@@ -114,7 +121,7 @@ void init_level(void);
 #define COL_DOWN 0x80
 #define COL_ALL 0x40
 
-const soa::Array<Metatile, 22> global_metatiles = {
+constexpr soa::Array<Metatile, 22> global_metatiles = {
 	//forest
   { 0, 0, 0, 0, 85, 0},
   { 1, 2, 22, 23, 85, COL_ALL+COL_DOWN},
@@ -235,6 +242,13 @@ int main() {
 	old_parallax_scroll = 0;
 	unsigned char bright = 0;
   unsigned char bright_count = 0;
+	
+	for (auto i = 0; i < MAX_ENEMY; ++i){
+		enemy_frame[i] = 0;
+		enemy_anim[i] = eninj_stand_left_anim;
+		enemy_anim_duration[i] = player_stand_duration;
+	}
+	
   while (1) {
     // infinite loop
     while (game_mode == MODE_GAME) {
@@ -246,6 +260,7 @@ int main() {
       set_scroll_y(scroll_y);
       
       animate_player();
+			animate_enemies();
       flicker_sprites();
       //puts("frame change done!\n");
       
@@ -455,7 +470,7 @@ void flicker_sprites(void) {
       if (high_byte(enemy_x[i-1]) > 0xf0)
         continue;
       if (enemy_active[i-1] && (high_byte(enemy_y[i-1]) < 0xf0)) {
-        oam_meta_spr(high_byte(enemy_x[i-1])+15, high_byte(enemy_y[i-1])+19, enemy_anim[i-1]);
+        oam_meta_spr(high_byte(enemy_x[i-1])+13, high_byte(enemy_y[i-1])+13, enemy_anim[i-1][enemy_frame[i-1]]);
       }
     }
     if (i > MAX_ENEMY && i < MAX_SHURIK+MAX_ENEMY+1) {
@@ -486,4 +501,24 @@ void animate_player(void) {
     //puts("frame change go!\n");
   }
   old_animation = Ninj.animation;
+}
+
+void animate_enemies(void) {
+	for (auto i = 0; i < MAX_ENEMY; ++i){
+		if (enemy_anim[i] != old_enemy_animation[i]) {
+			enemy_frame[i] = 0;
+		}
+		if (enemy_frame_counter[i] > 0) {
+			enemy_frame_counter[i]--;
+		} else {
+			if (enemy_anim_duration[i][enemy_frame[i]+1] > 0) {
+				enemy_frame[i]++;
+			} else {
+				enemy_frame[i] = 0;
+			}
+			enemy_frame_counter[i] = enemy_anim_duration[i][enemy_frame[i]];
+			//puts("frame change go!\n");
+		}
+		old_enemy_animation[i] = enemy_anim[i];
+	}
 }

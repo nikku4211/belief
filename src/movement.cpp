@@ -26,6 +26,7 @@
 
 #define PLAYER_WIDTH 13
 #define PLAYER_HEIGHT 26
+#define PLAYER_CROUCH_TOP 13
 #define PLAYER_CROUCH_HEIGHT 13
 
 #define MELEE_WIDTH 26
@@ -125,7 +126,7 @@ prg_rom_0 void movement(void) {
     bg_collision(high_byte(Ninj.x), high_byte(Ninj.y), PLAYER_WIDTH,
                  PLAYER_HEIGHT);
   } else {
-    bg_collision(high_byte(Ninj.x), high_byte(Ninj.y)+13, PLAYER_WIDTH,
+    bg_collision(high_byte(Ninj.x), high_byte(Ninj.y)+PLAYER_CROUCH_TOP, PLAYER_WIDTH,
                  PLAYER_CROUCH_HEIGHT);
   }
   if (collision_R &&
@@ -167,7 +168,7 @@ prg_rom_0 void movement(void) {
       bg_collision(high_byte(Ninj.x), high_byte(Ninj.y), PLAYER_WIDTH,
                    PLAYER_HEIGHT);
     } else {
-      bg_collision(high_byte(Ninj.x), high_byte(Ninj.y)+13, PLAYER_WIDTH,
+      bg_collision(high_byte(Ninj.x), high_byte(Ninj.y)+PLAYER_CROUCH_TOP, PLAYER_WIDTH,
                    PLAYER_CROUCH_HEIGHT);
     }
 
@@ -190,7 +191,7 @@ prg_rom_0 void movement(void) {
     bg_collision(high_byte(Ninj.x), high_byte(Ninj.y), PLAYER_WIDTH,
                  PLAYER_HEIGHT);
   } else {
-    bg_collision(high_byte(Ninj.x), high_byte(Ninj.y)+13, PLAYER_WIDTH,
+    bg_collision(high_byte(Ninj.x), high_byte(Ninj.y)+PLAYER_CROUCH_TOP, PLAYER_WIDTH,
                  PLAYER_CROUCH_HEIGHT);
   }
 
@@ -210,7 +211,7 @@ prg_rom_0 void movement(void) {
     bg_check_low(high_byte(Ninj.x), high_byte(Ninj.y), PLAYER_WIDTH,
                PLAYER_HEIGHT);
   } else {
-    bg_check_low(high_byte(Ninj.x), high_byte(Ninj.y)+13, PLAYER_WIDTH,
+    bg_check_low(high_byte(Ninj.x), high_byte(Ninj.y)+PLAYER_CROUCH_TOP, PLAYER_WIDTH,
                PLAYER_CROUCH_HEIGHT);
   }
 
@@ -334,47 +335,79 @@ void shurik_moves(void) {
 
 void enemy_moves(uint8_t index) {
 	//thanks wendel
-	puts("enemy ");
-	putchar('0' + index);
-	puts(" be movin\n");
-  if (enemy_type[index] == ENEMY_CHASE) {
-    // for bg collisions
+	// puts("enemy ");
+	// putchar('0' + index);
+	// puts(" be movin\n");
+	
+	// for bg collisions
     unsigned x = enemy_x[index];
-    unsigned y = enemy_y[index] + 1536; // mid point
-    uint8_t width = 13;
-
-    enemy_anim[index] = eninj_standR_data;
-    if (enemy_frames & 1)
-      return; // half speed
-    if (enemy_x[index] > Ninj.x) {
-      bg_collision_horizontal(high_byte(x) - 1, high_byte(y), width);
-      if (collision_L)
-        return;
-      if (enemy_actual_x[index] == 0)
-        --enemy_room[index];
-      enemy_actual_x[index] -= 256;
-    } else if (enemy_x[index] < Ninj.x) {
-      bg_collision_horizontal(high_byte(x) + 1, high_byte(y), width);
-      if (collision_R)
-        return;
-      if (enemy_actual_x[index] == 0)
+    unsigned y = enemy_y[index];
+    uint8_t width = ENEMY_WIDTH;
+  if (enemy_type[index] == ENEMY_PATROL) {
+		
+		if (enemy_vel_x[index] > 0) {
+			enemy_anim[index] = eninj_run_right_anim;
+			enemy_anim_duration[index] = player_run_duration;
+			bg_collision_horizontal(high_byte(x)+(ENEMY_WIDTH<<8), high_byte(y), width);
+      if (collision_R) {
+				enemy_vel_x[index] *= -1;
+				enemy_actual_x[index] -= 256;
+				return;
+			}
+			bg_check_low(high_byte(x)+(ENEMY_WIDTH<<8), high_byte(y), width, ENEMY_HEIGHT);
+			if (!collision_D) {
+				enemy_vel_x[index] *= -1;
+				enemy_actual_x[index] -= 256;
+				return;
+			}
+			if (enemy_actual_x[index] == 0xff00)
         ++enemy_room[index];
-			enemy_actual_x[index] += 256;
-    }
-  } else if (enemy_type[index] == ENEMY_BOUNCE) {
-    char anim_frame = (enemy_frames + (index << 3)) & 0x3f;
-    if (anim_frame < 16) {
-      enemy_anim[index] = eninj_throwR0_data;
-    } else if (anim_frame < 40) {
-      enemy_y[index] -= 256;
-      enemy_anim[index] = eninj_throwR1_data;
-    } else {
-      enemy_anim[index] = eninj_standR_data;
-      // check ground collision
-      bg_check_low(high_byte(enemy_x[index]), high_byte(enemy_y[index]) - 1, 15, 15);
-      if (!collision_D)
-        enemy_y[index] += 256;
-    }
+			enemy_actual_x[index] += enemy_vel_x[index];
+		} else if (enemy_vel_x[index] < 0) {
+			enemy_anim[index] = eninj_run_left_anim;
+			enemy_anim_duration[index] = player_run_duration;
+			bg_collision_horizontal(high_byte(x) - 256, high_byte(y), width);
+      if (collision_L) {
+				enemy_vel_x[index] *= -1;
+				enemy_actual_x[index] += 256;
+        return;
+			}
+			bg_check_low(high_byte(x)-256, high_byte(y), width, ENEMY_HEIGHT);
+			if (!collision_D) {
+				enemy_vel_x[index] *= -1;
+				enemy_actual_x[index] += 256;
+				return;
+			}
+			if (enemy_actual_x[index] == 0)
+        --enemy_room[index];
+			enemy_actual_x[index] += enemy_vel_x[index];
+		}
+    // if (enemy_frames & 1)
+      // return; // half speed
+  } else if (enemy_type[index] == ENEMY_SENTRY) {
+		// char anim_timer = (enemy_timer + (index << 3)) & 0x3f;
+		if (enemy_vel_y[index] > 0){
+			enemy_anim[index] = eninj_throw_left_anim;
+			puts("enemy falling\n");
+		} else {
+			enemy_anim[index] = eninj_stand_left_anim;
+			if ((enemy_timer & 0x07) == 0){
+				enemy_vel_y[index] = JUMP_VEL;
+				puts("enemy jump\n");
+			}
+		}
+		
+		if (enemy_vel_y[index] < JUMP_TERMINAL)
+			enemy_vel_y[index] += GRAVITY;
+		else
+			enemy_vel_y[index] = JUMP_TERMINAL;
+		
+		y += enemy_vel_y[index];
+		
+		bg_check_low(high_byte(x), high_byte(y), width, ENEMY_HEIGHT);
+		if (collision_D){
+			enemy_vel_y[index] = 0;
+		}
   }
 
 /*   for (uint8_t i = 0; i < MAX_ENEMY; ++i) {
@@ -395,18 +428,27 @@ void enemy_moves(uint8_t index) {
 
 void check_spr_objects(void) {
 	//puts("checking sprite objects\n");
-	++enemy_frames;
+	++enemy_timer;
   // mark each object "active" if they are, and get the screen x
 
   for (unsigned char i = 0; i < MAX_ENEMY; ++i) {
     enemy_active[i] = 0; // default to zero
     if (high_byte(enemy_y[i]) != TURN_OFF) {
-      unsigned x = (enemy_room[i] << 8) | high_byte(enemy_actual_x[i]) - scroll_x;
+      unsigned x = ((enemy_room[i] << 8) | high_byte(enemy_actual_x[i])) - scroll_x;
+			// puts("enemy check x:");
+			// putchar('0'+((x & 0xf0)>>4));
+			// putchar('0'+(x & 0x0f));
+			// puts("\n");
       enemy_active[i] = !high_byte(x);
+			// if (enemy_active[i]){
+				// puts("enemy ");
+				// putchar('0' + i);
+				// puts(" online\n");
+			// }
       if (!enemy_active[i])
         continue;
       enemy_x[i] = (x & 0xff) << 8; // screen x coords
-
+			
       enemy_moves(i); // if active, do its moves now
     }
   }
@@ -431,6 +473,10 @@ void sprite_obj_init(void) {
     enemy_room[i] = enemies[++j];
     enemy_actual_x[i] = (enemies[++j]) << 8;
 		enemy_type[i] = enemies[++j];
+		enemy_vel_x[i] = 0;
+		enemy_vel_y[i] = 0;
+		if (enemy_type[i] == ENEMY_PATROL)
+				enemy_vel_x[i] = -256;
     ++j;
   }
   for (++i; i < MAX_ENEMY; ++i)

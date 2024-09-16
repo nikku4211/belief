@@ -66,11 +66,16 @@ extern unsigned char pad1_new;
 
 extern unsigned enemy_x[MAX_ENEMY];
 extern unsigned enemy_y[MAX_ENEMY];
+extern int enemy_vel_x[MAX_ENEMY];
+extern int enemy_vel_y[MAX_ENEMY];
 extern unsigned char enemy_active[MAX_ENEMY];
 extern unsigned char enemy_room[MAX_ENEMY];
 extern unsigned enemy_actual_x[MAX_ENEMY];
 extern unsigned char enemy_type[MAX_ENEMY];
-extern const unsigned char *enemy_anim[MAX_ENEMY];
+extern unsigned char enemy_frame_counter[MAX_ENEMY];
+extern unsigned char enemy_frame[MAX_ENEMY];
+extern unsigned char const * const * enemy_anim[MAX_ENEMY];
+extern unsigned char const * enemy_anim_duration[MAX_ENEMY];
 
 #define MAX_SHURIK 3
 
@@ -97,7 +102,7 @@ extern unsigned char level;
 extern unsigned char level_up;
 extern unsigned char death;
 extern unsigned char map_loaded;   // only load it once
-extern unsigned char enemy_frames; // in case of skipped frames
+extern unsigned char enemy_timer; // in case of skipped frames
 
 void sprite_obj_init(void);
 

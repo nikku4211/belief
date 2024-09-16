@@ -77,3 +77,43 @@ const unsigned char player_throw_duration[]={
 	12,
 	0
 };
+
+const unsigned char* const eninj_stand_right_anim[]={
+	eninj_standR_data, eninj_standR_data
+};
+
+const unsigned char* const eninj_stand_left_anim[]={
+	eninj_standL_data, eninj_standR_data
+};
+
+const unsigned char* const eninj_lose_right_anim[]={
+	eninj_loseR_data, eninj_standR_data
+};
+
+const unsigned char* const eninj_lose_left_anim[]={
+	eninj_loseL_data, eninj_standR_data
+};
+
+const unsigned char* const eninj_run_right_anim[]={
+	eninj_runR0_data,
+	eninj_runR1_data,
+	eninj_runR2_data,
+	eninj_runR3_data, eninj_standR_data
+};
+
+const unsigned char* const eninj_run_left_anim[]={
+	eninj_runL0_data,
+	eninj_runL1_data,
+	eninj_runL2_data,
+	eninj_runL3_data, eninj_standR_data
+};
+
+const unsigned char* const eninj_throw_right_anim[]={
+	eninj_throwR0_data,
+	eninj_throwR1_data, eninj_standR_data
+};
+
+const unsigned char* const eninj_throw_left_anim[]={
+	eninj_throwL0_data,
+	eninj_throwL1_data, eninj_standR_data
+};
