@@ -5,7 +5,7 @@
 
 extern const unsigned char *const rooms[];
 
-enum { ENEMY_CHASE, ENEMY_BOUNCE };
+enum { ENEMY_PATROL, ENEMY_SENTRY };
 
 extern const unsigned char *const Enemy_list[];
 
