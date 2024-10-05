@@ -21,6 +21,7 @@
 #define MAX_SPEED 0x320
 #define JUMP_VEL (-0x600)
 #define JUMP_TERMINAL 0xf00
+#define ENEMY_JUMP_TERMINAL 0x300
 #define SAFE_JUMP_STEP 0x300
 #define FALL_DELAY_FRAMES 6
 
@@ -315,7 +316,7 @@ prg_rom_0 void movement(void) {
 }
 
 void shurik_moves(void) {
-  for (uint8_t i = 0; i < MAX_SHURIK; ++i) {
+  for (uint8_t i = 0; i < MAX_TOTAL_SHURIK; ++i) {
     if (shurik_active[i] == 1) {
       shurik_actual_x[i] += shurik_vel_x[i];
       shurik_y[i] += shurik_vel_y[i];
@@ -387,26 +388,48 @@ void enemy_moves(uint8_t index) {
   } else if (enemy_type[index] == ENEMY_SENTRY) {
 		// char anim_timer = (enemy_timer + (index << 3)) & 0x3f;
 		if (enemy_vel_y[index] > 0){
-			enemy_anim[index] = eninj_throw_left_anim;
 			puts("enemy falling\n");
-		} else {
-			enemy_anim[index] = eninj_stand_left_anim;
 			if ((enemy_timer & 0x07) == 0){
+				
+				shurik_active[enemy_shurik_throw_index[index]] = 1;
+				shurik_actual_x[enemy_shurik_throw_index[index]] = enemy_actual_x[index];
+				shurik_y[enemy_shurik_throw_index[index]] = enemy_y[index];
+				if (Ninj.x > x) {
+					enemy_anim[index] = eninj_throw_right_anim;
+					shurik_vel_x[enemy_shurik_throw_index[index]] = 0x200;
+				} else {
+					enemy_anim[index] = eninj_throw_left_anim;
+					shurik_vel_x[enemy_shurik_throw_index[index]] = -0x200;
+				}
+				shurik_vel_y[enemy_shurik_throw_index[index]] = 0;
+				
+				if (enemy_shurik_throw_index[index] < (MAX_TOTAL_SHURIK - 1))
+					enemy_shurik_throw_index[index]++;
+				else
+					enemy_shurik_throw_index[index] = MAX_SHURIK;
+			}
+				
+		} else {
+			if (Ninj.x > x)
+				enemy_anim[index] = eninj_stand_right_anim;
+			else
+				enemy_anim[index] = eninj_stand_left_anim;
+		}
+		
+		enemy_y[index] += enemy_vel_y[index];
+		
+		if (enemy_vel_y[index] < ENEMY_JUMP_TERMINAL)
+			enemy_vel_y[index] += GRAVITY;
+		else
+			enemy_vel_y[index] = ENEMY_JUMP_TERMINAL;
+		
+		bg_check_low(high_byte(x), high_byte(enemy_y[index]), width, ENEMY_HEIGHT);
+		if (collision_D){
+			enemy_vel_y[index] = 0;
+			if ((enemy_timer & 0x0f) == 0){
 				enemy_vel_y[index] = JUMP_VEL;
 				puts("enemy jump\n");
 			}
-		}
-		
-		if (enemy_vel_y[index] < JUMP_TERMINAL)
-			enemy_vel_y[index] += GRAVITY;
-		else
-			enemy_vel_y[index] = JUMP_TERMINAL;
-		
-		y += enemy_vel_y[index];
-		
-		bg_check_low(high_byte(x), high_byte(y), width, ENEMY_HEIGHT);
-		if (collision_D){
-			enemy_vel_y[index] = 0;
 		}
   }
 
@@ -453,9 +476,9 @@ void check_spr_objects(void) {
     }
   }
   
-  for (unsigned char i = 0; i < MAX_SHURIK; ++i) {
+  for (unsigned char i = 0; i < MAX_TOTAL_SHURIK; ++i) {
     if (high_byte(shurik_y[i]) != TURN_OFF) {
-      unsigned x = (shurik_room[i] << 8) | high_byte(shurik_actual_x[i]) - scroll_x;
+      unsigned x = high_byte(shurik_actual_x[i]) - scroll_x;
       shurik_x[i] = (x & 0xff) << 8; // screen x coords
     }
   }
@@ -478,21 +501,23 @@ void sprite_obj_init(void) {
 		if (enemy_type[i] == ENEMY_PATROL)
 				enemy_vel_x[i] = -256;
     ++j;
+		enemy_shurik_throw_index[i] = MAX_SHURIK;
   }
   for (++i; i < MAX_ENEMY; ++i)
     enemy_y[i] = TURN_OFF << 8;
   
-  for (i = 0, j = 0; i < MAX_SHURIK; ++i) {
+  for (i = 0; i < MAX_TOTAL_SHURIK; ++i) {
     shurik_x[i] = 0;
-    shurik_y[i] = TURN_OFF;
+    shurik_y[i] = TURN_OFF << 8;
     shurik_vel_x[i] = 0;
     shurik_vel_y[i] = 0;
     shurik_active[i] = 0;
-    shurik_room[i] = 0;
     shurik_actual_x[i] = 0;
+		if (i < MAX_SHURIK)
+			shurik_source[i] = 0;
+		else
+			shurik_source[i] = 1;
   }
-  for (++i; i < MAX_SHURIK; ++i)
-    shurik_y[i] = TURN_OFF << 8;
   
 }
 

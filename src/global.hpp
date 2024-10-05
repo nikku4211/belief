@@ -21,6 +21,7 @@ extern const soa::Array<Metatile, 22> global_metatiles;
 extern unsigned char collision_map[256];
 
 extern int scroll_x;
+extern int old_scroll_x;
 
 extern uint8_t parallax_buf[6 * 16];
 
@@ -78,15 +79,18 @@ extern unsigned char const * const * enemy_anim[MAX_ENEMY];
 extern unsigned char const * enemy_anim_duration[MAX_ENEMY];
 
 #define MAX_SHURIK 3
+#define MAX_TOTAL_SHURIK 6
 
-extern unsigned shurik_x[MAX_SHURIK];
-extern unsigned shurik_y[MAX_SHURIK];
-extern int shurik_vel_x[MAX_SHURIK];
-extern int shurik_vel_y[MAX_SHURIK];
-extern unsigned char shurik_active[MAX_SHURIK];
-extern unsigned char shurik_room[MAX_SHURIK];
-extern unsigned shurik_actual_x[MAX_SHURIK];
+extern unsigned shurik_x[MAX_TOTAL_SHURIK];
+extern unsigned shurik_y[MAX_TOTAL_SHURIK];
+extern int shurik_vel_x[MAX_TOTAL_SHURIK];
+extern int shurik_vel_y[MAX_TOTAL_SHURIK];
+extern unsigned char shurik_active[MAX_TOTAL_SHURIK];
+extern unsigned shurik_actual_x[MAX_TOTAL_SHURIK];
 extern unsigned char shurik_throw_index;
+
+extern unsigned char shurik_source[MAX_TOTAL_SHURIK];
+extern unsigned char enemy_shurik_throw_index[MAX_ENEMY];
 
 extern unsigned char game_mode;
 enum {

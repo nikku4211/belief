@@ -4,11 +4,13 @@
 #include <string.h>
 #include <soa.h>
 #include <stdio.h>
+#include <6502.h>
 
 #include "../chr/forestbg.h"
 #include "../chr/playerspr.h"
 #include "../chr/enemyninjspr.h"
 #include "../chr/shurikspr.h"
+#include "../chr/hud.h"
 
 #include "../level/rooms.h"
 #include "sprites.h"
@@ -24,6 +26,11 @@ MAPPER_USE_VERTICAL_MIRRORING;
 constexpr unsigned char kScreenWidth = 32;
 constexpr unsigned char kScreenHeight = 30;
 constexpr int kScreenSize = kScreenWidth * kScreenHeight;
+
+constexpr unsigned char hud_nt[32*2]={
+	0x00,0x00,0x00,0x00,0xf0,0xf1,0xf2,0xf3,0xf5,0xf5,0xf5,0xf5,0xf5,0xf5,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xf6,0xf7,0x00,0x00,0x00,0x00,
+	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xf4,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xf8,0xf9,0x00,0x00,0x00,0x00,
+};
 
 constexpr unsigned char hud_pal[] = {
 	  0x09, 0x0f, 0x16, 0x36, // hud
@@ -57,6 +64,7 @@ unsigned char pad1;
 unsigned char pad1_new;
 
 int scroll_x;
+int old_scroll_x;
 int scroll_y;
 unsigned char scroll_count;
 unsigned char L_R_switch;
@@ -92,26 +100,33 @@ unsigned char const * const * old_enemy_animation[MAX_ENEMY];
 #define ENEMY_HEIGHT 26
 
 #define MAX_SHURIK 3
+#define MAX_TOTAL_SHURIK 6
 
-unsigned shurik_x[MAX_SHURIK];
-unsigned shurik_y[MAX_SHURIK];
-int shurik_vel_x[MAX_SHURIK];
-int shurik_vel_y[MAX_SHURIK];
-unsigned char shurik_active[MAX_SHURIK];
-unsigned char shurik_room[MAX_SHURIK];
-unsigned shurik_actual_x[MAX_SHURIK];
-unsigned char shurik_throw_index;
+unsigned shurik_x[MAX_TOTAL_SHURIK];
+unsigned shurik_y[MAX_TOTAL_SHURIK];
+int shurik_vel_x[MAX_TOTAL_SHURIK];
+int shurik_vel_y[MAX_TOTAL_SHURIK];
+unsigned char shurik_active[MAX_TOTAL_SHURIK];
+unsigned shurik_actual_x[MAX_TOTAL_SHURIK];
+unsigned char shurik_throw_index = 0;
+
+unsigned char shurik_source[MAX_TOTAL_SHURIK];
+unsigned char enemy_shurik_throw_index[MAX_ENEMY];
 
 #define SHURIK_WIDTH 7
 #define SHURIK_HEIGHT 8
 
 uint8_t parallax_buf[6 * 16];
 
+unsigned char __zp dmc_irq_measure;
+unsigned char __zp dmc_irq_measure_flag;
+
 //void draw_sprites(void);
 void flicker_sprites(void);
 void animate_player(void);
 void animate_enemies(void);
 void init_level(void);
+void load_hud(void);
 
 // 0 = attr 0
 // 85 = attr 1
@@ -171,6 +186,10 @@ void init_ppu() {
   // Copy background tiles to CHR-RAM
   vram_adr(0x0000);
   vram_write(forestbg, sizeof(forestbg) - 1);
+	
+	// Copy HUD tiles to CHR-RAM
+  vram_adr(0x0F00);
+  vram_write(hud, sizeof(hud) - 1);
 
 	// Set the hud palette
 	
@@ -201,6 +220,10 @@ void init_ppu() {
   // Copy sprite tiles to CHR-RAM
   vram_adr(0x1e00);
   vram_write(shurikspr, 64);
+	
+	// Empty sprite tiles to CHR-RAM
+  vram_adr(0x1f00);
+  vram_fill(0x00, 32);
   
   // Set the sprite palette
   pal_spr(sprite_pal);
@@ -225,9 +248,12 @@ void init_level(void){
 }
 
 int main() {
+	CLI();
 	init_level();
 	
 	init_ppu();
+	
+	load_hud();
 
   load_room();
 
@@ -240,6 +266,8 @@ int main() {
   
   unsigned char old_direction = 0;
 	old_parallax_scroll = 0;
+	scroll_x = 0;
+	old_scroll_x = 0;
 	unsigned char bright = 0;
   unsigned char bright_count = 0;
 	
@@ -253,11 +281,12 @@ int main() {
     // infinite loop
     while (game_mode == MODE_GAME) {
       ppu_wait_nmi(); // wait till beginning of the frame
+			
 		  NAME_UPD_ENABLE = 0;
 
       // set scroll
-      set_scroll_x(scroll_x);
-      set_scroll_y(scroll_y);
+      //set_scroll_x(scroll_x);
+      //set_scroll_y(scroll_y);
       
       animate_player();
 			animate_enemies();
@@ -358,6 +387,16 @@ int main() {
   }
 }
 
+void load_hud(void){
+	auto addr = get_at_addr(0,0,0);
+	for (auto i = 0; i < 16; ++i) {
+    one_vram_buffer(0, addr);
+    addr++;
+  }
+	vram_adr(NTADR_A(0, 4));
+	vram_write(hud_nt, sizeof(hud_nt)-1);
+}
+
 //thanks jroweboy
 void update_tiles(int8_t diff) {
     if (diff == 0) {
@@ -446,18 +485,28 @@ void draw_sprites(void) {
 //Thanks Jroweboy
 void flicker_sprites(void) {
   oam_clear();
-  sprite_slot = 0;
+  sprite_slot = 1;
   
-  
+	//set sprite overflow sprites for screen split.
+	//this does mean i only have 55 sprites left
+  oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
+	oam_spr(0, 47, 241, 0);
   // Draw the player first to reserve their slot... or not
   // Everything else can fight with flickering... or not
   
   
   // OAM shuffle the rest of the sprites
-  shuffle_offset = mod_add<12>(shuffle_offset, 11);
+  shuffle_offset = mod_add<15>(shuffle_offset, 14);
   uint8_t original_offset = shuffle_offset;
-  uint8_t count = 12;
-  for (uint8_t i = original_offset; count > 0; --count, i = mod_add<12>(i, 7)) {
+  uint8_t count = 15;
+  for (uint8_t i = original_offset; count > 0; --count, i = mod_add<15>(i, 7)) {
     if (i == 0) {
       // draw 1 metasprite
   
@@ -470,16 +519,19 @@ void flicker_sprites(void) {
       if (high_byte(enemy_x[i-1]) > 0xf0)
         continue;
       if (enemy_active[i-1] && (high_byte(enemy_y[i-1]) < 0xf0)) {
-        oam_meta_spr(high_byte(enemy_x[i-1])+13, high_byte(enemy_y[i-1])+13, enemy_anim[i-1][enemy_frame[i-1]]);
+        oam_meta_spr(high_byte(enemy_x[i-1])+13, high_byte(enemy_y[i-1])+19, enemy_anim[i-1][enemy_frame[i-1]]);
       }
     }
-    if (i > MAX_ENEMY && i < MAX_SHURIK+MAX_ENEMY+1) {
+    if (i > MAX_ENEMY && i < MAX_TOTAL_SHURIK+MAX_ENEMY+1) {
       if (high_byte(shurik_y[i-MAX_ENEMY-1]) == TURN_OFF)
         continue;
       if (high_byte(shurik_x[i-MAX_ENEMY-1]) > 0xf0)
         continue;
       if (shurik_active[i-MAX_ENEMY-1] && (high_byte(shurik_y[i-MAX_ENEMY-1]) < 0xf0)) {
-        oam_meta_spr(high_byte(shurik_x[i-MAX_ENEMY-1])+12, high_byte(shurik_y[i-MAX_ENEMY-1])+19, shurik0_data);
+				if (shurik_source[i-MAX_ENEMY-1])
+					oam_meta_spr(high_byte(shurik_x[i-MAX_ENEMY-1])+12, high_byte(shurik_y[i-MAX_ENEMY-1])+19, enemy_shurik_anim[(enemy_timer & 0x04)>>2]);
+				else
+					oam_meta_spr(high_byte(shurik_x[i-MAX_ENEMY-1])+12, high_byte(shurik_y[i-MAX_ENEMY-1])+19, shurik_anim[(enemy_timer & 0x04)>>2]);
       }
     }
   }

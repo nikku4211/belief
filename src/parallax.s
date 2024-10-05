@@ -14,7 +14,9 @@ update_parallax_tiles:
 .globl flush_parallax_update
 flush_parallax_update:
   lda scroll_diff
-  beq .LskipUpdateParallax
+  bne 1f
+		jmp .LskipUpdateParallax
+1:
   lda #$00
   sta PPUADDR
   lda #$B0
@@ -24,12 +26,13 @@ flush_parallax_update:
   sta PPUCTRL
 ;this is where if this update loop isn't fast enough you can use
 ;an unrolled loop to make it faster
-  ldx #127
-.LparallaxLoop:
-    lda parallax_buf - 127,x
+  ;ldx #127
+;.LparallaxLoop:
+.rept 96
+    lda parallax_buf + \+
     sta PPUDATA
-    inx
-    bmi .LparallaxLoop
+    ;bmi .LparallaxLoop
+.endr
 
   lda PPUCTRL_VAR
   sta PPUCTRL
